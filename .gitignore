@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+.DS_Store
+coverage/
+gateway/node_modules/
+gateway/dist/
+.tunnel-url
+
+*.tsbuildinfo
+.idea/
+.vscode/
+!gateway/.env.example
