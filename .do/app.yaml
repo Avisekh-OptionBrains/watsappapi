@@ -9,6 +9,24 @@ databases:
     version: "7"
     production: false
 
+domains:
+  - domain: wa.optionbrains.com
+    type: PRIMARY
+  - domain: typebot.optionbrains.com
+    type: ALIAS
+  - domain: bot.optionbrains.com
+    type: ALIAS
+
+envs:
+  - key: DATABASE_URL
+    scope: RUN_TIME
+    type: SECRET
+    value: replace-with-postgres-url
+  - key: ENCRYPTION_SECRET
+    scope: RUN_TIME
+    type: SECRET
+    value: replace-me
+
 services:
   - name: gateway
     github:
@@ -93,19 +111,11 @@ services:
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-1gb
     envs:
-      - key: DATABASE_URL
-        type: SECRET
-        value: replace-with-postgres-url
-        scope: RUN_TIME
-      - key: ENCRYPTION_SECRET
-        type: SECRET
-        value: replace-me
-        scope: RUN_TIME
       - key: NEXTAUTH_URL
-        value: ${typebot-builder.PUBLIC_URL}
+        value: https://typebot.optionbrains.com
         scope: RUN_TIME
       - key: NEXT_PUBLIC_VIEWER_URL
-        value: ${typebot-viewer.PUBLIC_URL}
+        value: https://bot.optionbrains.com
         scope: RUN_TIME
       - key: DISABLE_SIGNUP
         value: "true"
@@ -124,19 +134,11 @@ services:
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-1gb
     envs:
-      - key: DATABASE_URL
-        type: SECRET
-        value: replace-with-postgres-url
-        scope: RUN_TIME
-      - key: ENCRYPTION_SECRET
-        type: SECRET
-        value: replace-me
-        scope: RUN_TIME
       - key: NEXTAUTH_URL
-        value: ${typebot-builder.PUBLIC_URL}
+        value: https://typebot.optionbrains.com
         scope: RUN_TIME
       - key: NEXT_PUBLIC_VIEWER_URL
-        value: ${typebot-viewer.PUBLIC_URL}
+        value: https://bot.optionbrains.com
         scope: RUN_TIME
       - key: DISABLE_SIGNUP
         value: "true"
@@ -171,6 +173,27 @@ services:
 
 ingress:
   rules:
+    - component:
+        name: gateway
+      match:
+        authority:
+          exact: wa.optionbrains.com
+        path:
+          prefix: /
+    - component:
+        name: typebot-builder
+      match:
+        authority:
+          exact: typebot.optionbrains.com
+        path:
+          prefix: /
+    - component:
+        name: typebot-viewer
+      match:
+        authority:
+          exact: bot.optionbrains.com
+        path:
+          prefix: /
     - component:
         name: gateway
       match:

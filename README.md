@@ -38,6 +38,12 @@ Configure Meta's callback as `<PUBLIC_BASE_URL>/webhook/meta`, use
 `WA_BUSINESS_TOKEN_WEBHOOK` as its verify token, and subscribe to `messages`.
 Quick-tunnel URLs change after restarts; production must use a fixed HTTPS domain.
 
+## DigitalOcean
+
+[![Deploy to DigitalOcean](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/Avisekh-OptionBrains/watsappapi/tree/main)
+
+The blueprint is `.do/deploy.template.yaml`. It creates the gateway, Typebot editor, Typebot preview, and Redis in Bangalore. Postgres is the `DATABASE_URL` you enter on that screen. Before you create the app, replace every `replace-me` value with the matching value from your local `.env`.
+
 ## Customer conversation
 
 The bundled Typebot public ID is `ob-support`.

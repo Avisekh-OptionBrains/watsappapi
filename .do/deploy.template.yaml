@@ -1,0 +1,202 @@
+spec:
+  name: watsappapi
+  region: blr
+  alerts:
+    - rule: DEPLOYMENT_FAILED
+
+  databases:
+    - name: redis
+      engine: REDIS
+      version: "7"
+      production: false
+
+  domains:
+    - domain: wa.optionbrains.com
+      type: PRIMARY
+    - domain: typebot.optionbrains.com
+      type: ALIAS
+    - domain: bot.optionbrains.com
+      type: ALIAS
+
+  envs:
+    - key: DATABASE_URL
+      scope: RUN_TIME
+      type: SECRET
+      value: replace-with-postgres-url
+    - key: ENCRYPTION_SECRET
+      scope: RUN_TIME
+      type: SECRET
+      value: replace-me
+
+  services:
+    - name: gateway
+      github:
+        repo: Avisekh-OptionBrains/watsappapi
+        branch: main
+        deploy_on_push: true
+      dockerfile_path: Dockerfile
+      source_dir: /
+      http_port: 3100
+      instance_count: 1
+      instance_size_slug: apps-s-1vcpu-0.5gb
+      health_check:
+        http_path: /health
+        initial_delay_seconds: 20
+        period_seconds: 10
+        timeout_seconds: 5
+        success_threshold: 1
+        failure_threshold: 5
+      envs:
+        - key: NODE_ENV
+          value: production
+          scope: RUN_TIME
+        - key: REDIS_URL
+          value: ${redis.DATABASE_URL}
+          scope: RUN_TIME
+        - key: TYPEBOT_API_URL
+          value: ${typebot-viewer.PRIVATE_URL}
+          scope: RUN_TIME
+        - key: TYPEBOT_VIEWER_URL
+          value: ${typebot-viewer.PRIVATE_URL}
+          scope: RUN_TIME
+        - key: TYPEBOT_PUBLIC_ID
+          value: ob-support
+          scope: RUN_TIME
+        - key: TYPEBOT_BRIDGE_ENABLED
+          value: "1"
+          scope: RUN_TIME
+        - key: EVOLUTION_ENABLED
+          value: "0"
+          scope: RUN_TIME
+        - key: WHATSAPP_PRODUCT_BOT_ENABLED
+          value: "0"
+          scope: RUN_TIME
+        - key: OB_RESEARCH_API_URL
+          value: https://optionbrains.com
+          scope: RUN_TIME
+        - key: OB_RESEARCH_WEBHOOK_URL
+          value: https://optionbrains.com/api/whatsapp/gateway
+          scope: RUN_TIME
+        - key: SERVICE_API_KEY
+          type: SECRET
+          value: replace-me
+          scope: RUN_TIME
+        - key: WA_BUSINESS_TOKEN_WEBHOOK
+          type: SECRET
+          value: replace-me
+          scope: RUN_TIME
+        - key: WHATSAPP_TOKEN
+          type: SECRET
+          value: replace-me
+          scope: RUN_TIME
+        - key: WHATSAPP_PHONE_NUMBER_ID
+          type: SECRET
+          value: replace-me
+          scope: RUN_TIME
+        - key: WHATSAPP_APP_SECRET
+          type: SECRET
+          value: replace-me
+          scope: RUN_TIME
+        - key: OB_RESEARCH_WEBHOOK_SECRET
+          type: SECRET
+          value: replace-me
+          scope: RUN_TIME
+
+    - name: typebot-viewer
+      image:
+        registry_type: DOCKER_HUB
+        registry: baptistearno
+        repository: typebot-viewer
+        tag: latest
+      http_port: 3000
+      instance_count: 1
+      instance_size_slug: apps-s-1vcpu-1gb
+      envs:
+        - key: NEXTAUTH_URL
+          value: https://typebot.optionbrains.com
+          scope: RUN_TIME
+        - key: NEXT_PUBLIC_VIEWER_URL
+          value: https://bot.optionbrains.com
+          scope: RUN_TIME
+        - key: DISABLE_SIGNUP
+          value: "true"
+          scope: RUN_TIME
+        - key: SMTP_AUTH_DISABLED
+          value: "false"
+          scope: RUN_TIME
+
+    - name: typebot-builder
+      image:
+        registry_type: DOCKER_HUB
+        registry: baptistearno
+        repository: typebot-builder
+        tag: latest
+      http_port: 3000
+      instance_count: 1
+      instance_size_slug: apps-s-1vcpu-1gb
+      envs:
+        - key: NEXTAUTH_URL
+          value: https://typebot.optionbrains.com
+          scope: RUN_TIME
+        - key: NEXT_PUBLIC_VIEWER_URL
+          value: https://bot.optionbrains.com
+          scope: RUN_TIME
+        - key: DISABLE_SIGNUP
+          value: "true"
+          scope: RUN_TIME
+        - key: SMTP_AUTH_DISABLED
+          value: "false"
+          scope: RUN_TIME
+        - key: DEFAULT_WORKSPACE_PLAN
+          value: UNLIMITED
+          scope: RUN_TIME
+        - key: SMTP_HOST
+          type: SECRET
+          value: replace-me
+          scope: RUN_TIME
+        - key: SMTP_PORT
+          value: "587"
+          scope: RUN_TIME
+        - key: SMTP_USERNAME
+          type: SECRET
+          value: replace-me
+          scope: RUN_TIME
+        - key: SMTP_PASSWORD
+          type: SECRET
+          value: replace-me
+          scope: RUN_TIME
+        - key: SMTP_SECURE
+          value: "false"
+          scope: RUN_TIME
+        - key: NEXT_PUBLIC_SMTP_FROM
+          value: OptionBrains <noreply@optionbrains.com>
+          scope: RUN_TIME
+
+  ingress:
+    rules:
+      - component:
+          name: gateway
+        match:
+          authority:
+            exact: wa.optionbrains.com
+          path:
+            prefix: /
+      - component:
+          name: typebot-builder
+        match:
+          authority:
+            exact: typebot.optionbrains.com
+          path:
+            prefix: /
+      - component:
+          name: typebot-viewer
+        match:
+          authority:
+            exact: bot.optionbrains.com
+          path:
+            prefix: /
+      - component:
+          name: gateway
+        match:
+          path:
+            prefix: /
