@@ -15,7 +15,7 @@ function required(name: string): string {
 }
 
 export const config = {
-  port: Number(env('GATEWAY_PORT', '3100')),
+  port: Number(env('PORT') || env('GATEWAY_PORT', '3100')),
   serviceApiKey: required('SERVICE_API_KEY'),
   webhookSharedSecret: env('WEBHOOK_SHARED_SECRET'),
   evolutionApiUrl: env('EVOLUTION_API_URL', 'http://localhost:8080').replace(/\/$/, ''),
