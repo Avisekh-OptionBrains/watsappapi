@@ -1,0 +1,28 @@
+{
+  "name": "wa-gateway",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Multi-site WhatsApp gateway on Cloudflare Workers (Meta Cloud API, D1, Queues)",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply wa-gateway --local",
+    "db:migrate": "wrangler d1 migrations apply wa-gateway --remote",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "hono": "^4.13.13",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261015.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7",
+    "wrangler": "^4.151.0"
+  }
+}
