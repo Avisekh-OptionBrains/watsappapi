@@ -30,13 +30,13 @@ async function businessInfo(env: Env, site: Site): Promise<string> {
   const catalog = await getCatalog(env, site).catch(() => null)
   for (const section of catalog?.sections ?? []) {
     lines.push('', `## ${section.title}${section.description ? ` - ${section.description}` : ''}`)
-    for (const item of section.items.slice(0, 15)) {
+    for (const item of section.items) {
       const parts = [
         `- ${item.title}`,
         item.priceLabel ? `(${item.priceLabel})` : null,
         item.subtitle ? `: ${item.subtitle}` : null,
-        item.highlights?.length ? `. ${item.highlights.slice(0, 4).join('; ')}` : null,
-        item.body ? `. ${item.body.replace(/\s+/g, ' ').slice(0, 300)}` : null,
+        item.highlights?.length ? `. ${item.highlights.slice(0, 8).join('; ')}` : null,
+        item.body ? `. ${item.body.replace(/\s+/g, ' ').slice(0, 400)}` : null,
         item.action ? ` [link: ${siteUrl(site, item.action.path)}]` : null,
       ]
       lines.push(parts.filter(Boolean).join(''))
@@ -45,7 +45,7 @@ async function businessInfo(env: Env, site: Site): Promise<string> {
   return lines
     .filter((l) => l !== null)
     .join('\n')
-    .slice(0, 12_000)
+    .slice(0, 40_000)
 }
 
 async function transcript(env: Env, phone: string, limit = 14): Promise<string> {

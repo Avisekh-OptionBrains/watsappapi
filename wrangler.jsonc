@@ -1,57 +1,66 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "wa-gateway",
-  "main": "src/index.ts",
-  "compatibility_date": "2026-09-01",
-  "observability": { "enabled": true },
-
-  // Staff dashboard at /admin (plain files, no build step).
-  "assets": { "directory": "./public" },
-
-  // Non-secret settings. Secrets (SITES, WHATSAPP_*, ADMIN_API_KEY) are set with
-  // `wrangler secret put` in production and `.dev.vars` locally.
-  "vars": {
-    "ENVIRONMENT": "production",
-    "DEFAULT_SITE": "optionbrains",
-    "WHATSAPP_GRAPH_VERSION": "v21.0",
-    "BOT_ENABLED": "1",
-    "CAMPAIGN_SEND_DELAY_MS": "300",
-    "CAMPAIGN_MAX_RECIPIENTS": "5000",
-    "WHATSAPP_WABA_ID": "4560544557534321",
-    "GEMINI_MODEL": "gemini-2.5-flash",
-    "AI_ENABLED": "1",
-    "AI_MAX_PER_HOUR": "15",
-    "ALERT_ESCALATE_MINUTES": "10"
-    // "DASHBOARD_URL": "https://wa.optionbrains.com"
-  },
-
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "wa-gateway",
-      // Replace with the id printed by `npx wrangler d1 create wa-gateway`.
-      "database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "migrations"
-    }
-  ],
-
-  "queues": {
-    "producers": [{ "binding": "CAMPAIGN_QUEUE", "queue": "wa-campaign" }],
-    "consumers": [
-      {
-        "queue": "wa-campaign",
-        "max_batch_size": 10,
-        "max_batch_timeout": 5,
-        "max_retries": 3,
-        "max_concurrency": 1,
-        "dead_letter_queue": "wa-campaign-dlq"
-      }
-    ]
-  },
-
-  // 17 3 * * *: daily cleanup of old rows. */5: re-alert staff about customers still waiting.
-  "triggers": { "crons": ["17 3 * * *", "*/5 * * * *"] }
-
-  // Enable once the zone is on Cloudflare (Meta needs a fixed HTTPS URL):
-  // "routes": [{ "pattern": "wa.optionbrains.com", "custom_domain": true }]
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "wa-gateway",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-09-01",
+	"observability": {
+		"enabled": true
+	},
+	// Staff dashboard at /admin (plain files, no build step).
+	"assets": {
+		"directory": "./public"
+	},
+	// Non-secret settings. Secrets (SITES, WHATSAPP_*, ADMIN_API_KEY) are set with
+	// `wrangler secret put` in production and `.dev.vars` locally.
+	"vars": {
+		"ENVIRONMENT": "production",
+		"DEFAULT_SITE": "optionbrains",
+		"WHATSAPP_GRAPH_VERSION": "v21.0",
+		"BOT_ENABLED": "1",
+		"CAMPAIGN_SEND_DELAY_MS": "300",
+		"CAMPAIGN_MAX_RECIPIENTS": "5000",
+		"WHATSAPP_WABA_ID": "4560544557534321",
+		"GEMINI_MODEL": "gemini-2.5-flash",
+		"AI_ENABLED": "1",
+		"AI_MAX_PER_HOUR": "15",
+		"ALERT_ESCALATE_MINUTES": "10",
+		"DASHBOARD_URL": "https://wa-gateway.optionbrains-wa.workers.dev"
+	},
+	"workers_dev": true,
+	"preview_urls": false,
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "wa-gateway",
+			"database_id": "4fe6c3e5-6d8c-4126-b1ab-2128c9032b36",
+			"migrations_dir": "migrations"
+		}
+	],
+	"queues": {
+		"producers": [
+			{
+				"binding": "CAMPAIGN_QUEUE",
+				"queue": "wa-campaign"
+			}
+		],
+		"consumers": [
+			{
+				"queue": "wa-campaign",
+				"max_batch_size": 10,
+				"max_batch_timeout": 5,
+				"max_retries": 3,
+				"max_concurrency": 1,
+				"dead_letter_queue": "wa-campaign-dlq"
+			}
+		]
+	},
+	// 17 3 * * *: daily cleanup of old rows. */5: re-alert staff about customers still waiting.
+	"triggers": {
+		"crons": [
+			"17 3 * * *",
+			"*/5 * * * *"
+		]
+	}
+	// Enable once the zone is on Cloudflare (Meta needs a fixed HTTPS URL):
+	// "routes": [{ "pattern": "wa.optionbrains.com", "custom_domain": true }]
 }

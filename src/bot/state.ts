@@ -3,7 +3,7 @@ import type { Env } from '../env'
 export type BotStep =
   | { step: 'menu' }
   | { step: 'brands' }
-  | { step: 'section'; sectionId: string }
+  | { step: 'section'; sectionId: string; page?: number }
   | { step: 'item'; sectionId: string; itemId: string }
   | { step: 'await_email'; next?: string }
   | { step: 'await_otp'; email: string; next?: string }

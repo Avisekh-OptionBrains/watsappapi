@@ -16,7 +16,8 @@ const siteSchema = z.object({
   webhook: z
     .object({
       url: z.string().url(),
-      secret: z.string().min(16),
+      /** Defaults to the site's apiKey. */
+      secret: z.string().min(16).optional(),
     })
     .optional(),
   /** Website endpoints the WhatsApp bot calls (catalog, sign-in, account status). */
@@ -24,7 +25,8 @@ const siteSchema = z.object({
     .object({
       enabled: z.boolean().default(true),
       apiUrl: z.string().url(),
-      apiKey: z.string().min(16),
+      /** Defaults to the site's apiKey. */
+      apiKey: z.string().min(16).optional(),
       connector: z.enum(['standard', 'optionbrains']).default('standard'),
     })
     .optional(),
@@ -43,7 +45,11 @@ const siteSchema = z.object({
       instructions: z.string().max(4000).default(''),
     })
     .optional(),
-})
+}).transform((site) => ({
+  ...site,
+  webhook: site.webhook && { ...site.webhook, secret: site.webhook.secret ?? site.apiKey },
+  bot: site.bot && { ...site.bot, apiKey: site.bot.apiKey ?? site.apiKey },
+}))
 
 export type Site = z.infer<typeof siteSchema>
 

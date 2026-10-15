@@ -35,6 +35,8 @@ describe('crypto', () => {
     expect(await verifyMetaSignature('app-secret', body, `sha256=${sig}`)).toBe(true)
     expect(await verifyMetaSignature('other', body, `sha256=${sig}`)).toBe(false)
     expect(await verifyMetaSignature('app-secret', body, undefined)).toBe(false)
+    expect(await verifyMetaSignature('first, app-secret', body, `sha256=${sig}`)).toBe(true)
+    expect(await verifyMetaSignature('first,second', body, `sha256=${sig}`)).toBe(false)
   })
 })
 
@@ -55,6 +57,14 @@ describe('sites', () => {
   it('defaults the bot connector to standard', () => {
     const [s] = parseSites(JSON.stringify([site({ bot: { apiUrl: 'https://x.com/api/wa', apiKey: 'b'.repeat(20) } })]))
     expect(s.bot).toMatchObject({ enabled: true, connector: 'standard' })
+  })
+
+  it('uses the site apiKey for the bot and webhook unless overridden', () => {
+    const [s] = parseSites(
+      JSON.stringify([site({ bot: { apiUrl: 'https://x.com/api/wa' }, webhook: { url: 'https://x.com/api/gw' } })]),
+    )
+    expect(s.bot?.apiKey).toBe('k'.repeat(32))
+    expect(s.webhook?.secret).toBe('k'.repeat(32))
   })
 })
 

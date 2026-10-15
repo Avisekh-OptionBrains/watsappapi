@@ -9,6 +9,7 @@
     "deploy": "wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply wa-gateway --local",
     "db:migrate": "wrangler d1 migrations apply wa-gateway --remote",
+    "secrets:prod": "wrangler secret bulk .prod.vars",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

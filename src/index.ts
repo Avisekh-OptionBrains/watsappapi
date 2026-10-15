@@ -44,6 +44,7 @@ async function cleanup(env: Env): Promise<void> {
     env.DB.prepare(`DELETE FROM handoffs WHERE status = 'resolved' AND updated_at < ?`).bind(now - 30 * DAY_MS),
     env.DB.prepare('DELETE FROM chat_messages WHERE created_at < ?').bind(now - 180 * DAY_MS),
     env.DB.prepare('DELETE FROM support_requests WHERE requested_at < ?').bind(now - 365 * DAY_MS),
+    env.DB.prepare('DELETE FROM rate_limits WHERE reset_at < ?').bind(now),
   ])
 }
 

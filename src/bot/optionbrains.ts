@@ -45,7 +45,7 @@ export function mapOptionBrainsPlans(items: unknown[]): CatalogSection {
       body: p.description || undefined,
       priceLabel: p.fromPrice || undefined,
       highlights: [
-        ...(p.highlights ?? []).slice(0, 3),
+        ...(p.highlights ?? []).slice(0, 8),
         ...(p.isTopTier ? ['All-Access includes eligible model portfolios.'] : []),
       ],
       action: { label: 'Continue to buy', path: sitePath(p.buyPath, `/buy/${p.slug}`), signIn: true },

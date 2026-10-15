@@ -1,11 +1,13 @@
 node_modules/
 .wrangler/
 .dev.vars
+.prod.vars
 .env
 .env.*
 !.dev.vars.example
 *.log
 coverage/
+dist/
 *.tsbuildinfo
 .DS_Store
 .idea/

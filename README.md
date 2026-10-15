@@ -9,6 +9,8 @@ What it does:
 - **Campaigns** — bulk template sends through a Cloudflare Queue, with consent checks and per-recipient delivery tracking.
 - **Consent** — per-site marketing opt-in plus a WhatsApp-wide STOP / START.
 - **Bot** — a native WhatsApp menu for every site: catalog (plans, portfolios, hosting...), email-code sign-in with a one-tap website link, account status, help, and handoff to a person. Customers pick the brand when more than one site has a bot.
+  - The whole catalog is reachable: long categories get **Next page / Previous** rows, and when a site has more categories than fit the menu the last row opens **All products**.
+  - Customers can type a product name ("F&O", "alpha momentum", "catalog"): one clear match opens it, several show a pick list, and products of the other brands on the shared number are offered too.
 - **Catalog** — each site's products normalised into one shape and cached in D1 (`GET /v1/catalog`).
 - **Events** — inbound messages, delivery receipts and handoff requests are posted to the right site's webhook.
 - **Staff dashboard** — `/admin`: live overview, every chat with photos / files, customers asking for a person, take over / assign / reply / send templates and files / hand back to the bot, notes, tags, saved replies, campaigns, reports and alerts.
@@ -33,8 +35,8 @@ All websites are configured in the `SITES` secret — a JSON array:
 | `apiKey` | yes | Key the site uses to call this gateway (≥ 24 chars, unique) |
 | `publicUrl` | yes | Website origin; bot links must stay on this domain |
 | `supportUrl`, `supportEmail` | no | Shown in Help |
-| `webhook.url`, `webhook.secret` | no | Where events are posted (`x-webhook-secret` header) |
-| `bot.apiUrl`, `bot.apiKey` | no | Website bot API (Bearer `bot.apiKey`). Omit to disable the bot for the site |
+| `webhook.url`, `webhook.secret` | no | Where events are posted (`x-webhook-secret` header; secret defaults to `apiKey`) |
+| `bot.apiUrl`, `bot.apiKey` | no | Website bot API (Bearer `bot.apiKey`, defaults to `apiKey`). Omit to disable the bot for the site |
 | `bot.connector` | no | `standard` (default) or `optionbrains` (legacy ob-research API) |
 | `otp.template`, `otp.language`, `otp.copyButton` | no | Defaults `otp_code`, `en_US`, `true` |
 | `ai.enabled`, `ai.instructions` | no | Gemini answers for this site (default on when `GEMINI_API_KEY` is set); extra facts / tone |
@@ -45,9 +47,9 @@ All websites are configured in the `SITES` secret — a JSON array:
 
 1. Implement the four bot endpoints below on the site (or skip them for OTP/notifications only).
 2. Add an entry to `SITES` with a new random `apiKey`, then `npx wrangler secret put SITES`.
-3. Give the site `WHATSAPP_GATEWAY_URL` and `WHATSAPP_GATEWAY_KEY` (its `apiKey`).
+3. Give the site two settings: the gateway URL and its `apiKey` (ob-research: `WATSAPP_API_URL`, `WATSAPP_SERVICE_KEY`).
 
-No gateway code changes are needed.
+No gateway code changes are needed. The site needs no Meta credentials and no rate limiting of its own for bot calls: the gateway limits sign-in codes per phone and email.
 
 ## Website connector contract
 
@@ -229,8 +231,26 @@ Then:
 
 1. **Custom domain** — uncomment `routes` in `wrangler.jsonc` (`wa.optionbrains.com`, zone must be on Cloudflare) and deploy again. The `*.workers.dev` URL also works.
 2. **Meta webhook** — WhatsApp → Configuration: callback `https://wa.optionbrains.com/webhook/meta`, verify token = `WHATSAPP_VERIFY_TOKEN`, subscribe to `messages`.
-3. **Sites** — set `WHATSAPP_GATEWAY_URL=https://wa.optionbrains.com` and `WHATSAPP_GATEWAY_KEY=<site apiKey>` on each website.
+3. **Sites** — give each website the gateway URL and its `apiKey` (ob-research: `WATSAPP_API_URL`, `WATSAPP_SERVICE_KEY`).
 4. Check `https://wa.optionbrains.com/health` — `warnings` must be empty.
+
+Secrets can also go in one file: copy the values into `.prod.vars` (git-ignored, `KEY=value` lines) and run `npm run secrets:prod`.
+
+### CI / CD (GitHub Actions)
+
+`.github/workflows/ci-cd.yml` runs on every push and pull request: typecheck, tests, dashboard script check and a dry-run Worker build. On `main` it then applies D1 migrations, uploads secrets (optional), deploys and checks `/health`.
+
+One-time setup in GitHub → repository → Settings → Secrets and variables → Actions:
+
+| Kind | Name | Value |
+| --- | --- | --- |
+| Secret | `CLOUDFLARE_API_TOKEN` | Cloudflare → My Profile → API Tokens → "Edit Cloudflare Workers" template, plus Account → **D1: Edit** and **Queues: Edit** |
+| Variable | `CLOUDFLARE_ACCOUNT_ID` | From `npx wrangler whoami` |
+| Variable | `DEPLOY_ENABLED` | `true` (deploys are skipped until set) |
+| Variable | `GATEWAY_URL` | e.g. `https://wa-gateway.<subdomain>.workers.dev` (health check after deploy) |
+| Secret (optional) | `WORKER_SECRETS` | Full contents of `.prod.vars`; uploaded on every deploy so secrets live in one place |
+
+Add required reviewers to the `production` environment if deploys should wait for approval. Changes reach production by merging to `main`; for risky changes open a pull request first so the checks run before merge.
 
 Logs: `npx wrangler tail`. The Workers Paid plan ($5/mo) is recommended for production CPU limits and queue volume.
 

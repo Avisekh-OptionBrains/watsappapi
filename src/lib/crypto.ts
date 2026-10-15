@@ -22,15 +22,21 @@ export async function hmacSha256Hex(secret: string, body: ArrayBuffer | string):
   return [...new Uint8Array(signature)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-/** Validates Meta's `X-Hub-Signature-256: sha256=<hex>` header. */
+/**
+ * Validates Meta's `X-Hub-Signature-256: sha256=<hex>` header. `appSecrets` may list several
+ * comma-separated secrets: every Meta app subscribed to the WABA signs with its own secret.
+ */
 export async function verifyMetaSignature(
-  appSecret: string,
+  appSecrets: string,
   rawBody: ArrayBuffer,
   header: string | null | undefined,
 ): Promise<boolean> {
   if (!header?.startsWith('sha256=')) return false
-  const expected = await hmacSha256Hex(appSecret, rawBody)
-  return safeEqual(header.slice('sha256='.length).toLowerCase(), expected)
+  const given = header.slice('sha256='.length).toLowerCase()
+  for (const secret of appSecrets.split(',').map((s) => s.trim()).filter(Boolean)) {
+    if (safeEqual(given, await hmacSha256Hex(secret, rawBody))) return true
+  }
+  return false
 }
 
 export function newId(): string {

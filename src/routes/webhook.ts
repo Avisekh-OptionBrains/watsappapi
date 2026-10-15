@@ -164,5 +164,7 @@ async function respondToInbound(env: Env, site: Site, msg: InboundMessage, kind:
 
   if (env.BOT_ENABLED === '0') return
   if (msg.type !== 'text' && msg.type !== 'interactive' && msg.type !== 'button') return
+  // Interactive replies the bot never offered (call permission, flows) carry no option id.
+  if (msg.type !== 'text' && !msg.interactiveId) return
   await handleBotMessage(env, { phone: msg.from, text: msg.text, interactiveId: msg.interactiveId })
 }

@@ -2,6 +2,8 @@ import type { Env } from '../env'
 import { getCatalog } from '../lib/catalog'
 import { emitSiteEvent } from '../lib/events'
 import { effectiveMode, getConversation, setConversationMode } from '../lib/conversations'
+import { underLimit } from '../lib/limits'
+import type { ListRow } from '../lib/meta'
 import { toNationalDigits } from '../lib/phone'
 import { alertNewRequest, openSupportRequest, resolveSupportRequests } from '../lib/support'
 import { botSites, defaultSite, getSite, siteUrl, type Site } from '../sites'
@@ -17,8 +19,12 @@ import {
   setPhoneSite,
   type BotSession,
 } from './state'
+import { LIST_ROWS, bestHit, pageForIndex, pageOf, searchCatalog, type CatalogHit } from './browse'
 import type { CatalogItem, CatalogSection } from './types'
 
+type SiteHit = CatalogHit & { site: Site }
+
+const BROWSE_RE = /^(catalog(ue)?|all products|products|everything|browse|show all|all plans and portfolios)$/i
 const GREETING_RE = /^(hi+|hello+|hey+|hii+|start|menu|home|main menu)\b/i
 const EXIT_RE = /^(#?(exit|quit|end)|bye)$/i
 const HELP_RE = /^(help|support|faq|contact)\b/i
@@ -26,6 +32,17 @@ const SIGNIN_RE = /\b(sign ?in|log ?in)\b/i
 const ACCOUNT_RE = /\b(my account|account|status|kyc|subscription|my plan)\b/i
 const PERSON_RE = /\b(agent|human|person|executive|call me|talk to)\b/i
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+const MINUTE_MS = 60 * 1000
+const DAY_MS = 24 * 60 * MINUTE_MS
+/** Websites trust the gateway's service key, so sign-in abuse limits live here. */
+async function mayRequestCode(env: Env, phone: string, email: string): Promise<boolean> {
+  return (
+    (await underLimit(env, `code:phone:${phone}`, 3, 15 * MINUTE_MS)) &&
+    (await underLimit(env, `code:phone-day:${phone}`, 10, DAY_MS)) &&
+    (await underLimit(env, `code:email:${email}`, 3, 15 * MINUTE_MS))
+  )
+}
 
 type Ctx = {
   env: Env
@@ -115,13 +132,61 @@ export async function handleBotMessage(env: Env, msg: InboundForBot): Promise<vo
   if (SIGNIN_RE.test(text)) return askEmail(ctx)
   if (ACCOUNT_RE.test(text)) return showAccount(ctx)
 
-  const catalog = await getCatalog(env, site)
-  const section = matchSection(catalog?.sections ?? [], text)
-  if (section && !looksLikeQuestion(text)) return showSection(ctx, section.id)
+  const sections = (await getCatalog(env, site))?.sections ?? []
+  if (BROWSE_RE.test(text)) return showCatalog(ctx, sections, 0)
 
-  if (aiAvailable(env, site) && text.length >= 3) return answerWithAi(ctx, section?.id)
-  if (section) return showSection(ctx, section.id)
+  const useAi = aiAvailable(env, site) && text.length >= 3
+  // "F&O plan" opens the product; "what is the price of F&O?" deserves a written answer.
+  const tried = !looksLikeQuestion(text) || !useAi
+  if (tried && (await showCatalogMatch(ctx, sections, text, !useAi))) return
+  if (useAi) return answerWithAi(ctx, async () => {
+    if (tried || !(await showCatalogMatch(ctx, sections, text, true))) await showMenu(ctx)
+  })
   return showMenu(ctx)
+}
+
+/**
+ * Product by name, then a whole category, then a list of matches (also from the other brands).
+ * `loose` also lists products matching only some of the words (when no AI can answer instead).
+ */
+async function showCatalogMatch(ctx: Ctx, sections: CatalogSection[], text: string, loose: boolean): Promise<boolean> {
+  const hits = searchCatalog(sections, text).filter((h) => loose || h.all || h.exact)
+  const best = bestHit(hits)
+  if (best) {
+    await showItem(ctx, best.section.id, best.item.id)
+    return true
+  }
+  const section = matchSection(sections, text)
+  if (section) {
+    await showSection(ctx, section.id)
+    return true
+  }
+  if (hits.length) {
+    await showResults(ctx, text, hits.map((h) => ({ ...h, site: ctx.site })))
+    return true
+  }
+  const elsewhere = await searchOtherSites(ctx, text)
+  if (elsewhere.length) {
+    await showResults(ctx, text, elsewhere)
+    return true
+  }
+  return false
+}
+
+async function searchOtherSites(ctx: Ctx, text: string): Promise<SiteHit[]> {
+  const others = botSites(ctx.env).filter((s) => s.id !== ctx.site.id)
+  const found = await Promise.all(
+    others.map(async (site) => {
+      const catalog = await getCatalog(ctx.env, site).catch(() => null)
+      return searchCatalog(catalog?.sections ?? [], text)
+        .filter((h) => h.all || h.exact)
+        .map((h) => ({ ...h, site }))
+    }),
+  )
+  return found
+    .flat()
+    .sort((a, b) => b.score - a.score)
+    .slice(0, LIST_ROWS - 1)
 }
 
 /** "what is the price of F&O plan?" deserves an answer, "plans" just the list. */
@@ -130,11 +195,9 @@ export function looksLikeQuestion(text: string): boolean {
   return t.includes('?') || t.split(/\s+/).length >= 5 || /^(what|how|why|when|which|can|do|does|is|are|kya|kaise|kab)\b/i.test(t)
 }
 
-async function answerWithAi(ctx: Ctx, fallbackSection?: string): Promise<void> {
+async function answerWithAi(ctx: Ctx, fallback: () => Promise<void>): Promise<void> {
   const answer = await aiAnswer(ctx.env, ctx.site, ctx.phone)
-  if (!answer || answer.action === 'menu') {
-    return fallbackSection ? showSection(ctx, fallbackSection) : showMenu(ctx)
-  }
+  if (!answer || answer.action === 'menu') return fallback()
   if (answer.action === 'handoff') return startHandoff(ctx)
   const ai = createReplier(ctx.env, ctx.site, ctx.phone, 'AI')
   const options = await ai.buttons(answer.reply, [
@@ -185,14 +248,24 @@ async function dispatch(ctx: Ctx, id: string): Promise<void> {
     return askEmail(ctx, { next: pending?.next })
   }
   if (id.startsWith('next:')) return askEmail(ctx, { next: id.slice(5) })
-  if (id.startsWith('sec:')) return showSection(ctx, id.slice(4))
-  if (id.startsWith('item:')) {
-    const [, sectionId, itemId] = id.split(':')
-    return showItem(ctx, sectionId, itemId)
+  if (id === 'catalog' || id.startsWith('cat:')) {
+    const sections = (await getCatalog(ctx.env, ctx.site))?.sections ?? []
+    return showCatalog(ctx, sections, Number(id.slice(4)) || 0)
   }
-  if (id.startsWith('act:')) {
-    const [, sectionId, itemId] = id.split(':')
-    return runAction(ctx, sectionId, itemId)
+  if (id.startsWith('sec:')) {
+    const m = /^sec:(.+?)(?::(\d+))?$/.exec(id)
+    return m ? showSection(ctx, m[1], Number(m[2] ?? 0)) : showMenu(ctx)
+  }
+  if (id.startsWith('item:') || id.startsWith('act:')) {
+    const [kind, sectionId, ...rest] = id.split(':')
+    return kind === 'item' ? showItem(ctx, sectionId, rest.join(':')) : runAction(ctx, sectionId, rest.join(':'))
+  }
+  if (id.startsWith('xs:')) {
+    const [, siteId, sectionId, ...rest] = id.split(':')
+    const other = botSites(ctx.env).find((s) => s.id === siteId)
+    if (!other) return showMenu(ctx)
+    await setPhoneSite(ctx.env, ctx.phone, other.id)
+    return showItem(ctxFor(ctx.env, other, ctx.phone, ctx.text), sectionId, rest.join(':'))
   }
   return showMenu(ctx)
 }
@@ -210,26 +283,72 @@ async function showBrands(env: Env, phone: string, sites: Site[]): Promise<void>
   await saveSession(env, phone, host.id, { step: 'brands', options })
 }
 
+function sectionRow(s: CatalogSection): ListRow {
+  return { id: `sec:${s.id}`, title: s.title, description: s.description || `${s.items.length} options` }
+}
+
+/** Every category fits: if there are too many for the menu, the last slot opens the full list. */
+export function menuSectionRows(sections: CatalogSection[], room: number): ListRow[] {
+  const listed = sections.filter((s) => s.items.length)
+  if (listed.length <= room) return listed.map(sectionRow)
+  const items = listed.reduce((n, s) => n + s.items.length, 0)
+  return [
+    ...listed.slice(0, room - 1).map(sectionRow),
+    { id: 'catalog', title: 'All products', description: `${listed.length} categories, ${items} options` },
+  ]
+}
+
+/** One page of a long list, with "Previous" / "Next" rows that reopen the same list. */
+export function pagedRows<T>(all: T[], page: number, toRow: (t: T) => ListRow, pageId: (p: number) => string) {
+  const pg = pageOf(all, page)
+  const rows: ListRow[] = pg.items.map(toRow)
+  if (pg.hasPrev) rows.push({ id: pageId(pg.page - 1), title: '◀ Previous', description: 'Go back a page' })
+  if (pg.hasNext) {
+    const left = all.length - pg.start - pg.items.length
+    rows.push({ id: pageId(pg.page + 1), title: 'Next page ▶', description: `${left} more` })
+  }
+  const range = all.length > LIST_ROWS ? `Showing ${pg.start + 1}-${pg.start + pg.items.length} of ${all.length}.` : ''
+  return { rows, page: pg.page, range }
+}
+
 async function showMenu(ctx: Ctx): Promise<void> {
   const catalog = await getCatalog(ctx.env, ctx.site)
-  const rows: Array<{ id: string; title: string; description?: string }> = []
-  for (const s of catalog?.sections ?? []) {
-    if (s.items.length) rows.push({ id: `sec:${s.id}`, title: s.title, description: s.description })
-  }
-  rows.push({ id: 'signin', title: 'Sign in', description: 'Get an email code, then open the website' })
-  rows.push({ id: 'account', title: 'My account', description: 'Your status and subscriptions' })
-  rows.push({ id: 'help', title: 'Help', description: 'Support or talk to our team' })
+  const fixed: ListRow[] = [
+    { id: 'signin', title: 'Sign in', description: 'Get an email code, then open the website' },
+    { id: 'account', title: 'My account', description: 'Your status and subscriptions' },
+    { id: 'help', title: 'Help', description: 'Support or talk to our team' },
+  ]
   const others = botSites(ctx.env).filter((s) => s.id !== ctx.site.id)
   if (others.length) {
-    rows.push({ id: 'switch_site', title: 'Other services', description: others.map((s) => s.name).join(', ') })
+    fixed.push({ id: 'switch_site', title: 'Other services', description: others.map((s) => s.name).join(', ') })
   }
+  const rows = [...menuSectionRows(catalog?.sections ?? [], LIST_ROWS - fixed.length), ...fixed]
 
   const options = await ctx.reply.list({
-    body: `Welcome to ${ctx.site.name}${ctx.site.tagline ? ` - ${ctx.site.tagline}` : ''}.\n\nWhat would you like to do?`,
+    body: `Welcome to ${ctx.site.name}${ctx.site.tagline ? ` - ${ctx.site.tagline}` : ''}.\n\nWhat would you like to do? You can also type a product name.`,
     button: 'Open menu',
     sectionTitle: 'Main menu',
-    rows: rows.slice(0, 10),
+    rows,
     footer: 'Reply Menu anytime to come back here',
+  })
+  await save(ctx, { step: 'menu', options })
+}
+
+/** Every category of the site (when the main menu has no room for all of them). */
+async function showCatalog(ctx: Ctx, sections: CatalogSection[], page: number): Promise<void> {
+  const listed = sections.filter((s) => s.items.length)
+  if (!listed.length) {
+    await ctx.reply.text('Nothing is listed right now. Please check the website or try again later.')
+    return showMenu(ctx)
+  }
+  if (listed.length === 1) return showSection(ctx, listed[0].id)
+  const { rows, range } = pagedRows(listed, page, sectionRow, (p) => `cat:${p}`)
+  const options = await ctx.reply.list({
+    body: `Everything at ${ctx.site.name}.\n\nPick a category.${range ? `\n\n${range}` : ''}`,
+    button: 'Categories',
+    sectionTitle: 'Categories',
+    rows,
+    footer: 'Reply Menu for the main menu',
   })
   await save(ctx, { step: 'menu', options })
 }
@@ -239,45 +358,73 @@ async function findSection(ctx: Ctx, sectionId: string): Promise<CatalogSection 
   return catalog?.sections.find((s) => s.id === sectionId) ?? null
 }
 
-async function showSection(ctx: Ctx, sectionId: string): Promise<void> {
+async function showSection(ctx: Ctx, sectionId: string, page = 0): Promise<void> {
   const section = await findSection(ctx, sectionId)
   if (!section || !section.items.length) {
     await ctx.reply.text('Nothing is listed here right now. Please check the website or try again later.')
     return showMenu(ctx)
   }
-  const more = section.items.length > 10 ? `\n\nShowing 10 of ${section.items.length}. See all at ${siteUrl(ctx.site, '/')}` : ''
+  const shown = pagedRows(
+    section.items,
+    page,
+    (item) => ({ id: `item:${section.id}:${item.id}`, title: item.title, description: item.subtitle || item.priceLabel }),
+    (p) => `sec:${section.id}:${p}`,
+  )
   const options = await ctx.reply.list({
-    body: `${section.title}${section.description ? `\n${section.description}` : ''}\n\nPick one to see details.${more}`,
+    body: `${section.title}${section.description ? `\n${section.description}` : ''}\n\nPick one to see details.${shown.range ? `\n\n${shown.range}` : ''}`,
     button: 'View options',
     sectionTitle: section.title,
-    rows: section.items.slice(0, 10).map((item) => ({
-      id: `item:${section.id}:${item.id}`,
-      title: item.title,
-      description: item.subtitle || item.priceLabel,
-    })),
+    rows: shown.rows,
+    footer: 'Reply Menu for the main menu',
   })
-  await save(ctx, { step: 'section', sectionId: section.id, options })
+  await save(ctx, { step: 'section', sectionId: section.id, page: shown.page, options })
 }
 
+/** Products matching what the customer typed; rows from another brand switch to it. */
+async function showResults(ctx: Ctx, text: string, hits: SiteHit[]): Promise<void> {
+  const elsewhere = hits.some((h) => h.site.id !== ctx.site.id)
+  const rows: ListRow[] = hits.slice(0, LIST_ROWS - 1).map((h) => ({
+    id: h.site.id === ctx.site.id ? `item:${h.section.id}:${h.item.id}` : `xs:${h.site.id}:${h.section.id}:${h.item.id}`,
+    title: h.item.title,
+    description: [h.site.id === ctx.site.id ? h.section.title : h.site.name, h.item.priceLabel].filter(Boolean).join(' · '),
+  }))
+  rows.push({ id: 'home', title: 'Main menu' })
+  const quoted = text.trim().slice(0, 40)
+  const options = await ctx.reply.list({
+    body: elsewhere
+      ? `We found "${quoted}" at our other services. Pick one to see details.`
+      : `Here is what matches "${quoted}". Pick one to see details.`,
+    button: 'View matches',
+    sectionTitle: 'Matches',
+    rows,
+  })
+  await save(ctx, { step: 'menu', options })
+}
+
+const DETAIL_MAX = 1000
+
+/** Title, price, highlights and as much of the description as fits one WhatsApp message. */
 export function itemDetailText(item: CatalogItem): string {
-  return [
-    item.title,
-    item.priceLabel || null,
-    item.body ? `\n${item.body}` : null,
-    item.highlights?.length ? `\n${item.highlights.slice(0, 4).map((h) => `• ${h}`).join('\n')}` : null,
-  ]
-    .filter(Boolean)
-    .join('\n')
+  const highlights = item.highlights?.length ? `\n${item.highlights.slice(0, 8).map((h) => `• ${h}`).join('\n')}` : null
+  const build = (body: string | null) =>
+    [item.title, item.priceLabel || null, body ? `\n${body}` : null, highlights].filter(Boolean).join('\n')
+  const full = build(item.body?.trim() || null)
+  if (full.length <= DETAIL_MAX || !item.body) return full.slice(0, DETAIL_MAX)
+  const room = DETAIL_MAX - build(null).length - 3
+  const body = room >= 40 ? `${item.body.trim().slice(0, room - 1).trimEnd()}…` : null
+  return build(body).slice(0, DETAIL_MAX)
 }
 
 async function showItem(ctx: Ctx, sectionId: string, itemId: string): Promise<void> {
   const section = await findSection(ctx, sectionId)
-  const item = section?.items.find((i) => i.id === itemId)
+  const index = section?.items.findIndex((i) => i.id === itemId) ?? -1
+  const item = index >= 0 ? section!.items[index] : null
   if (!section || !item) return showMenu(ctx)
 
+  const page = pageForIndex(section.items.length, index)
   const buttons = [
     ...(item.action ? [{ id: `act:${section.id}:${item.id}`, title: item.action.label }] : []),
-    { id: `sec:${section.id}`, title: 'Back' },
+    { id: page ? `sec:${section.id}:${page}` : `sec:${section.id}`, title: 'Back' },
     { id: 'home', title: 'Main menu' },
   ]
   const options = await ctx.reply.buttons(itemDetailText(item), buttons)
@@ -316,6 +463,11 @@ async function handleEmail(ctx: Ctx, next: string | undefined): Promise<void> {
 async function sendCode(ctx: Ctx, email: string, next: string | undefined): Promise<void> {
   const connector = connectorFor(ctx.site)
   if (!connector) return showHelp(ctx)
+  if (!(await mayRequestCode(ctx.env, ctx.phone, email))) {
+    await ctx.reply.text('Too many code requests. Please wait 15 minutes and try again, or reply Menu.')
+    await save(ctx, { step: 'await_email', next })
+    return
+  }
   const sent = await connector.sendOtp({ email, phone: toNationalDigits(ctx.phone) })
   if (!sent.ok) {
     await ctx.reply.text(
@@ -368,6 +520,10 @@ async function handleOtp(ctx: Ctx, email: string, next: string | undefined): Pro
   }
   const connector = connectorFor(ctx.site)
   if (!connector) return showHelp(ctx)
+  if (!(await underLimit(ctx.env, `verify:phone:${ctx.phone}`, 8, 15 * MINUTE_MS))) {
+    await ctx.reply.text('Too many wrong codes. Please wait 15 minutes, then tap Resend code.')
+    return
+  }
   const verified = await connector.verifyOtp({ email, phone: toNationalDigits(ctx.phone), otp, next })
   if (!verified.ok) {
     const options = await ctx.reply.buttons(friendlyOtpError(verified.message), [

@@ -24,6 +24,7 @@ export type Env = {
   WHATSAPP_PHONE_NUMBER_ID: string
   /** WhatsApp Business Account id; needed to list approved templates. */
   WHATSAPP_WABA_ID?: string
+  /** Comma-separated when several Meta apps are subscribed to the WABA. */
   WHATSAPP_APP_SECRET?: string
   WHATSAPP_VERIFY_TOKEN: string
   WHATSAPP_GRAPH_VERSION?: string
